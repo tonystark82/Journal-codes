@@ -1,0 +1,259 @@
+import numpy as np
+import csv
+import pandas as pd
+import scipy as sp
+import scipy.stats as stats
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit 
+
+df = pd.read_excel('ppEff.xlsx', sheetname='BP')
+x = df['Enth']
+y = df['Eff']
+
+%matplotlib inline
+
+try:
+    import uncertainties.unumpy as unp
+    import uncertainties as unc
+except:
+    import pip
+    pip.main(['install','uncertainties'])
+    import uncertainties.unumpy as unp
+    import uncertainties as unc
+    
+#logarithmic function
+def f(x, a, b):
+    return a * np.log(x) + b
+
+#perform regression
+popt, pcov = curve_fit(f, x, y)
+
+#retrieve parameter values
+a = popt[0]
+b = popt[1]
+print('Optimal Values')
+print('a: ' + str(a))
+print('b: ' + str(b))
+
+n = len(y)
+
+#compute r^2
+r2 = 1.0-(sum((y-f(x,a,b))**2)/((n-1.0)*np.var(y,ddof=1)))
+print('R^2: ' + str(r2))
+
+# calculate parameter confidence interval
+a,b = unc.correlated_values(popt, pcov)
+print('Uncertainty')
+print('a: ' + str(a))
+print('b: ' + str(b))
+
+# plot data
+plt.scatter(x, y, s=3, label='Binary Plant')
+
+# calculate regression confidence interval
+px = np.linspace(300, 1200, 1500)
+py = a*unp.log(px)+b
+nom = unp.nominal_values(py)
+std = unp.std_devs(py)
+
+def predband(x, xd, yd, p, func, conf=0.95):
+    # x = requested points
+    # xd = x data
+    # yd = y data
+    # p = parameters
+    # func = function name
+    alpha = 1.0 - conf    # significance
+    N = xd.size          # data sample size
+    var_n = len(p)  # number of parameters
+    # Quantile of Student's t distribution for p=(1-alpha/2)
+    q = stats.t.ppf(1.0 - alpha / 2.0, N - var_n)
+    # Stdev of an individual measurement
+    se = np.sqrt(1. / (N - var_n) * \
+                 np.sum((yd - func(xd, *p)) ** 2))
+    # Auxiliary definitions
+    sx = (x - xd.mean()) ** 2
+    sxd = np.sum((xd - xd.mean()) ** 2)
+    # Predicted values (best-fit model)
+    yp = func(x, *p)
+    # Prediction band
+    dy = q * se * np.sqrt(1.0+ (1.0/N) + (sx/sxd))
+    # Upper & lower prediction bands.
+    lpb, upb = yp - dy, yp + dy
+    return lpb, upb
+
+lpb, upb = predband(px, x, y, popt, f, conf=0.95)
+
+# plot the regression
+plt.plot(px, nom, c='black', label=r'$\eta_{conv} $' + ' = 6.4630' + r'${ln(h)}$' + ' - 36.3851, R^2=0.65')
+
+# uncertainty lines (95% confidence)
+plt.plot(px, nom - 1.96 * std, c='orange',\
+         label='95% Confidence Region')
+plt.plot(px, nom + 1.96 * std, c='orange')
+# prediction band (95% confidence)
+plt.plot(px, lpb, 'k--', label='lower bound 95% Prediction Band')
+plt.plot(px, upb, 'r--', label='upper bound 95% Prediction Band')
+plt.ylabel('Efficiency (%)')
+plt.xlabel('Reservoir Enthalpy (kJ/kg)')
+plt.rcParams.update({'font.size': 8})
+plt.legend(loc='best')
+
+plt.savefig('regression_BP.pdf')
+
+#linear regression
+def f(x, a, b):
+    return a * x + b
+
+#perform regression
+popt, pcov = curve_fit(f, x, y)
+
+#retrieve parameter values
+a = popt[0]
+b = popt[1]
+
+#calculate parameter stdev
+s_a = np.sqrt(pcov[0,0])
+s_b = np.sqrt(pcov[1,1])
+
+#calcuate 95% confidence interval
+aL = a-1.96*s_a
+aU = a+1.96*s_a
+bL = b-1.96*s_b
+bU = b+1.96*s_b
+
+#calculate 3sigma interval
+a3L = a-3.0*s_a
+a3U = a+3.0*s_a
+b3L = b-3.0*s_b
+b3U = b+3.0*s_b
+
+#Generate contour plot of SSE ratio vs parameters
+# meshgrid is +/- change in the objective value
+
+m = 200
+
+i1 = np.linspace(a3L,a3U,m)
+i2 = np.linspace(b3L,b3U,m)
+a_grid, b_grid = np.meshgrid(i1, i2)
+n = len(y) #number of data points
+p = 2      #number of parameters 
+
+#sum of squared errors
+sse = np.empty((m,m))
+for i in range (m):
+    for j in range (m):
+        at = a_grid[i,j]
+        bt = b_grid[i,j]
+        sse[i,j] = np.sum((y-f(x,at,bt))**2)
+        
+#normalize to the optimal solution
+best_sse = np.sum((y-f(x,a,b))**2)
+fsse = (sse - best_sse)/best_sse
+
+#compute f-statistic for the f-test
+alpha = 0.05 #alpha, confidence
+             #alpha=0.05 is 95% confidence
+fstat = sp.stats.f.isf(alpha,p,(n-p))
+flim = fstat * p/(n-p)
+obj_lim = flim * best_sse + best_sse
+
+#create a contour plot
+plt.figure()
+CS = plt.contour(a_grid,b_grid,sse,[500,600,750,1000],colors='gray')
+plt.clabel(CS, inline=1, fontsize=10)
+plt.xlabel('Slope (a)')
+plt.ylabel('Intercept (b)')
+
+#solid line to show confidence region
+CS = plt.contour(a_grid,b_grid,sse,[obj_lim],colors='orange',linewidths=[2.0])
+plt.clabel(CS, inline=1, fontsize=10)
+
+#2 dummy plots (gray,orange) for legend
+plt.plot([aL,aL],[bL,bL],c='gray',LineWidth=3, label='Objective')
+plt.plot([aL,aU,aU,aL,aL],[bL,bL,bU,bU,bL],c='blue',LineWidth=3, label='Parameter Confidence Region')
+plt.plot([aL,aL],[bL,bL],c='orange',LineWidth=3, label='Joint Confidence Region')
+plt.scatter(a,b,s=10,c='red',marker='o',label='Optimal Solution')
+
+plt.title('Parameter Statistics (y = ax + b)')
+plt.legend(loc=1)
+
+#exponential function
+def f(x, a, b):
+    return a * np.log(x) + b
+
+#perform regression
+popt, pcov = curve_fit(f, x, y)
+
+#retrieve parameter values
+a = popt[0]
+b = popt[1]
+#c = popt[2]
+
+#calculate parameter stdev
+s_a = np.sqrt(pcov[0,0])
+s_b = np.sqrt(pcov[1,1])
+#s_c = np.sqrt(pcov[2,2])
+
+#calcuate 95% confidence interval
+aL = a-1.96*s_a
+aU = a+1.96*s_a
+bL = b-1.96*s_b
+bU = b+1.96*s_b
+#cL = c-1.96*s_c
+#cU = c+1.96*s_c
+
+#calculate 3sigma interval
+a3L = a-3.0*s_a
+a3U = a+3.0*s_a
+b3L = b-3.0*s_b
+b3U = b+3.0*s_b
+
+#Generate contour plot of SSE ratio vs parameters
+# meshgrid is +/- change in the objective value
+
+m = 200
+
+i1 = np.linspace(a3L,a3U,m)
+i2 = np.linspace(b3L,b3U,m)
+a_grid, b_grid = np.meshgrid(i1, i2)
+n = len(y) #number of data points
+p = 2      #number of parameters 
+
+#sum of squared errors
+sse = np.empty((m,m))
+for i in range (m):
+    for j in range (m):
+        at = a_grid[i,j]
+        bt = b_grid[i,j]
+        sse[i,j] = np.sum((y-f(x,at,bt))**2)
+        
+#normalize to the optimal solution
+best_sse = np.sum((y-f(x,a,b))**2)
+fsse = (sse - best_sse)/best_sse
+
+#compute f-statistic for the f-test
+alpha = 0.05 #alpha, confidence
+             #alpha=0.05 is 95% confidence
+fstat = sp.stats.f.isf(alpha,p,(n-p))
+flim = fstat * p/(n-p)
+obj_lim = flim * best_sse + best_sse
+
+#create a contour plot
+plt.figure()
+CS = plt.contour(a_grid,b_grid,sse,[500,600,750,1000],colors='gray')
+plt.clabel(CS, inline=1, fontsize=10)
+plt.xlabel('Slope (a)')
+plt.ylabel('Intercept (b)')
+
+#solid line to show confidence region
+CS = plt.contour(a_grid,b_grid,sse,[obj_lim],colors='orange',linewidths=[2.0])
+plt.clabel(CS, inline=1, fontsize=10)
+
+#2 dummy plots (gray,orange) for legend
+plt.plot([aL,aL],[bL,bL],c='gray',LineWidth=3, label='Objective')
+plt.plot([aL,aU,aU,aL,aL],[bL,bL,bU,bU,bL],c='blue',LineWidth=3, label='Parameter Confidence Region')
+plt.plot([aL,aL],[bL,bL],c='orange',LineWidth=3, label='Joint Confidence Region')
+plt.scatter(a,b,s=10,c='red',marker='o',label='Optimal Solution')
+
+plt.title('Parameter Statistics (y = a ln(x) + b)')
+plt.legend(loc=1)
