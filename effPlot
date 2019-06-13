@@ -1,0 +1,17 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+%matplotlib inline
+
+df1 = pd.read_excel('Bodvarsson.xlsx', sheetname='Bodvarsson_AveEff')
+df2 = pd.read_excel('Bodvarsson.xlsx', sheetname='Bodvarsson_IdealEngine')
+
+plt.plot(df1['T'], df1['Eff'], label='Average Efficiency of Real Engine')
+plt.plot(df2['T'], df2['Eff'], label='Efficiency of Ideal Engine' "\n" '(Carnot Efficiency)')
+
+plt.ylabel('Efficiency (%)')
+plt.xlabel('Initial Rock Temperature ($^\circ$C)')
+plt.legend(loc=0)
+
+plt.savefig('bodvarsson_efficiency.png')
