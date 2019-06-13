@@ -1,0 +1,9 @@
+import warnings
+warnings.simplefilter('ignore', FutureWarning)
+
+from pandas import *
+
+import IPython
+print(IPython.sys_info())
+
+kuira = read_csv('kuirau_I.csv')
